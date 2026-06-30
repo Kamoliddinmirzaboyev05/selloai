@@ -83,3 +83,21 @@ The Instagram module includes:
 
 These endpoints are intentionally structured for future production Meta OAuth, messaging, and comment reply implementation.
 
+## Production Deployment
+
+Production domains:
+
+- Frontend: `https://sello.webportfolio.uz`
+- Backend API: `https://selloapi.webportfolio.uz`
+- Meta OAuth callback: `https://selloapi.webportfolio.uz/auth/meta/callback`
+- Instagram webhook: `https://selloapi.webportfolio.uz/webhooks/instagram`
+
+Production config files:
+
+- `.env.production.example`
+- `docker-compose.prod.yml`
+- `deploy/nginx/sello.http.conf`
+- `deploy/nginx/sello.conf`
+- `docs/deployment/ubuntu-vps.md`
+
+See [Ubuntu VPS deployment guide](docs/deployment/ubuntu-vps.md) for Docker Compose, Nginx, HTTPS, and Certbot steps.

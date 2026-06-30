@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     meta_graph_api_version: str = Field(default="v20.0", alias="META_GRAPH_API_VERSION")
     meta_app_id: str | None = Field(default=None, alias="META_APP_ID")
     meta_app_secret: str | None = Field(default=None, alias="META_APP_SECRET")
+    meta_oauth_callback_url: str | None = Field(default=None, alias="META_OAUTH_CALLBACK_URL")
+    instagram_webhook_url: str | None = Field(default=None, alias="INSTAGRAM_WEBHOOK_URL")
 
     @property
     def cors_origins(self) -> list[str]:
