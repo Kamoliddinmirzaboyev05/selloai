@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { apiRequest, setToken } from "@/lib/api";
+import { apiRequest, Organization, setStoredOrganizationId, setToken } from "@/lib/api";
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
@@ -34,6 +34,14 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         token: null,
       });
       setToken(response.access_token);
+      const organizations = await apiRequest<Organization[]>("/organizations", {
+        token: response.access_token,
+      });
+      if (organizations.length > 0) {
+        setStoredOrganizationId(organizations[0].id);
+        router.push("/dashboard");
+        return;
+      }
       router.push("/dashboard/onboarding");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed");
@@ -43,8 +51,8 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-mist px-4">
-      <form onSubmit={submit} className="w-full max-w-sm border border-line bg-white p-6 shadow-sm">
+    <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top_left,#dff3ef,transparent_34%),#f4f6f8] px-4">
+      <form onSubmit={submit} className="w-full max-w-sm rounded-lg border border-line bg-white p-6 shadow-sm">
         <div className="mb-6">
           <div className="text-xl font-semibold">Sello AI</div>
           <p className="mt-1 text-sm text-zinc-600">
@@ -63,7 +71,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
             <input
               name="email"
               type="email"
-              className="mt-1 w-full border border-line px-3 py-2"
+              className="mt-1 w-full rounded border border-line px-3 py-2"
               required
             />
           </label>
@@ -73,7 +81,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
               name="password"
               type="password"
               minLength={8}
-              className="mt-1 w-full border border-line px-3 py-2"
+              className="mt-1 w-full rounded border border-line px-3 py-2"
               required
             />
           </label>
@@ -96,4 +104,3 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
     </main>
   );
 }
-

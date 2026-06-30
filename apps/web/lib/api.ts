@@ -1,6 +1,12 @@
 "use client";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "http://localhost:8000/api/v1";
+const API_BASE_URL = API_URL.endsWith("/api/v1")
+  ? API_URL
+  : `${API_URL.replace(/\/$/, "")}/api/v1`;
 const TOKEN_KEY = "sello_access_token";
 const ORG_KEY = "sello_organization_id";
 
@@ -91,6 +97,10 @@ export function setStoredOrganizationId(id: string) {
   window.localStorage.setItem(ORG_KEY, id);
 }
 
+export function clearStoredOrganizationId() {
+  window.localStorage.removeItem(ORG_KEY);
+}
+
 export async function apiRequest<T>(
   path: string,
   options: { method?: ApiMethod; body?: unknown; token?: string | null } = {},
@@ -117,4 +127,3 @@ export async function apiRequest<T>(
 
   return response.json() as Promise<T>;
 }
-
