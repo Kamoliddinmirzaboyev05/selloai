@@ -18,11 +18,11 @@ from app.oauth.schemas import OAuthAccessToken, OAuthProvider, ProviderAccountTy
 
 INSTAGRAM_OAUTH_SCOPES = (
     "instagram_basic",
-    "instagram_manage_comments",
     "instagram_manage_messages",
+    "instagram_manage_comments",
     "pages_show_list",
     "pages_read_engagement",
-    "pages_manage_metadata",
+    "business_management",
 )
 
 

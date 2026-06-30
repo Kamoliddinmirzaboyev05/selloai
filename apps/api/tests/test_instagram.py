@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -107,7 +108,16 @@ async def test_instagram_oauth_login_redirects_to_meta(client: AsyncClient, monk
     assert location.startswith("https://www.facebook.com/")
     assert "client_id=meta-app-id" in location
     assert "redirect_uri=https%3A%2F%2Fselloapi.webportfolio.uz%2Fauth%2Fmeta%2Fcallback" in location
-    assert "instagram_basic" in location
+    scopes = set(parse_qs(urlparse(location).query)["scope"][0].split(","))
+    assert scopes == {
+        "instagram_basic",
+        "instagram_manage_messages",
+        "instagram_manage_comments",
+        "pages_show_list",
+        "pages_read_engagement",
+        "business_management",
+    }
+    assert "pages_manage_metadata" not in scopes
     assert "state=" in location
 
 
