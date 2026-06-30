@@ -73,6 +73,20 @@ POSTGRES_PASSWORD=<strong-db-password>
 API_DATABASE_URL=postgresql+asyncpg://sello:<strong-db-password>@postgres:5432/sello
 ```
 
+If the VPS already has projects using ports `3000` or `8000`, set different local-only host ports before starting Compose:
+
+```text
+API_HOST_PORT=18000
+WEB_HOST_PORT=13000
+```
+
+Then update the Nginx upstream ports in `deploy/nginx/sello.conf` on that VPS to match:
+
+```text
+Frontend upstream: http://127.0.0.1:13000
+Backend upstream:  http://127.0.0.1:18000
+```
+
 ## 5. Start Production Containers
 
 ```bash
@@ -83,8 +97,8 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
 Check local container endpoints:
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/health
-curl -I http://127.0.0.1:3000
+curl http://127.0.0.1:${API_HOST_PORT:-8000}/api/v1/health
+curl -I http://127.0.0.1:${WEB_HOST_PORT:-3000}
 ```
 
 ## 6. Nginx Reverse Proxy
@@ -115,8 +129,8 @@ sudo systemctl reload nginx
 
 The final config redirects HTTP to HTTPS and proxies:
 
-- `https://sello.webportfolio.uz` -> `127.0.0.1:3000`
-- `https://selloapi.webportfolio.uz` -> `127.0.0.1:8000`
+- `https://sello.webportfolio.uz` -> `127.0.0.1:${WEB_HOST_PORT:-3000}`
+- `https://selloapi.webportfolio.uz` -> `127.0.0.1:${API_HOST_PORT:-8000}`
 - `https://selloapi.webportfolio.uz/auth/meta/callback` -> `/api/v1/integrations/instagram/oauth/callback`
 - `https://selloapi.webportfolio.uz/webhooks/instagram` -> `/api/v1/webhooks/instagram`
 
