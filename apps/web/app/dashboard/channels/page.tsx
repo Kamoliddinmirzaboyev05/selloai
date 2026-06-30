@@ -9,6 +9,8 @@ import {
   Channel,
   getStoredOrganizationId,
   getToken,
+  InstagramConnectionResponse,
+  InstagramDisconnectResponse,
   InstagramOAuthLoginResponse,
   Organization,
   setStoredOrganizationId,
@@ -23,6 +25,9 @@ export default function ChannelsPage() {
   const [error, setError] = useState<string | null>(null);
   const [connectingTelegram, setConnectingTelegram] = useState(false);
   const [connectingInstagram, setConnectingInstagram] = useState(false);
+  const [connectingInstagramToken, setConnectingInstagramToken] = useState(false);
+  const [disconnectingInstagram, setDisconnectingInstagram] = useState(false);
+  const [instagramConnection, setInstagramConnection] = useState<InstagramConnectionResponse | null>(null);
 
   async function refreshChannels(activeOrganizationId = organizationId) {
     if (!activeOrganizationId) return;
@@ -123,8 +128,58 @@ export default function ChannelsPage() {
     }
   }
 
+  async function connectInstagramToken(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!organizationId) {
+      router.replace("/dashboard/onboarding");
+      return;
+    }
+
+    setConnectingInstagramToken(true);
+    setMessage(null);
+    setError(null);
+    setInstagramConnection(null);
+    const form = new FormData(event.currentTarget);
+    const accessToken = String(form.get("access_token") || "").trim();
+    try {
+      const response = await apiRequest<InstagramConnectionResponse>("/integrations/instagram/token/connect", {
+        method: "POST",
+        body: { organization_id: organizationId, access_token: accessToken },
+      });
+      setInstagramConnection(response);
+      setMessage(`Instagram connected as ${response.instagram_username || response.instagram_account_id}.`);
+      event.currentTarget.reset();
+      await refreshChannels(organizationId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not connect Instagram token.");
+    } finally {
+      setConnectingInstagramToken(false);
+    }
+  }
+
+  async function disconnectInstagram() {
+    if (!instagramChannel) return;
+    setDisconnectingInstagram(true);
+    setMessage(null);
+    setError(null);
+    setInstagramConnection(null);
+    try {
+      await apiRequest<InstagramDisconnectResponse>(
+        `/integrations/instagram/channels/${instagramChannel.id}/disconnect`,
+        { method: "POST" },
+      );
+      setMessage("Instagram disconnected.");
+      if (organizationId) await refreshChannels(organizationId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not disconnect Instagram.");
+    } finally {
+      setDisconnectingInstagram(false);
+    }
+  }
+
   const telegramChannel = channels.find((channel) => channel.type === "telegram");
-  const instagramChannel = channels.find((channel) => channel.type === "instagram");
+  const instagramChannel = channels.find((channel) => channel.type === "instagram" && channel.status !== "disabled");
+  const instagramConnected = instagramChannel?.status === "active";
   const instagramNeedsReconnect =
     instagramChannel?.status === "needs_reconnect" || instagramChannel?.status === "error";
 
@@ -190,8 +245,8 @@ export default function ChannelsPage() {
               </div>
             </div>
             <StatusBadge
-              active={Boolean(instagramChannel) && !instagramNeedsReconnect}
-              label={instagramNeedsReconnect ? "Reconnect required" : instagramChannel ? "Connected" : "Ready"}
+              active={instagramConnected}
+              label={instagramNeedsReconnect ? "Reconnect required" : instagramConnected ? "Connected" : "Ready"}
             />
           </div>
           <div className="mt-5 space-y-3 border-t border-line pt-5 text-sm">
@@ -203,10 +258,10 @@ export default function ChannelsPage() {
                 className="mt-2 inline-flex items-center gap-2 rounded-lg bg-teal px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
                 type="button"
                 onClick={connectInstagram}
-                disabled={connectingInstagram || (Boolean(instagramChannel) && !instagramNeedsReconnect)}
+                disabled={connectingInstagram || instagramConnected}
               >
                 {connectingInstagram ? <Loader2 size={16} className="animate-spin" /> : <Instagram size={16} />}
-                {instagramChannel && !instagramNeedsReconnect
+                {instagramConnected
                   ? "Instagram connected"
                   : connectingInstagram
                     ? "Opening Meta..."
@@ -215,10 +270,50 @@ export default function ChannelsPage() {
                       : "Connect Instagram"}
               </button>
             ) : null}
-            {instagramChannel && !instagramNeedsReconnect ? (
+            {!instagramConnected && organizationId ? (
+              <form className="space-y-3 rounded-lg border border-line bg-mist p-3" onSubmit={connectInstagramToken}>
+                <label className="block text-sm font-medium">
+                  Generated access token
+                  <input
+                    className="mt-2 w-full rounded border border-line px-3 py-2"
+                    name="access_token"
+                    placeholder="Paste Meta access token"
+                    required
+                    type="password"
+                  />
+                </label>
+                <button
+                  className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-medium shadow-sm disabled:opacity-60"
+                  disabled={connectingInstagramToken}
+                  type="submit"
+                >
+                  {connectingInstagramToken ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                  {connectingInstagramToken ? "Verifying..." : "Connect with token"}
+                </button>
+              </form>
+            ) : null}
+            {instagramConnected ? (
               <p className="rounded border border-[#bfe7df] bg-[#edf8f5] px-3 py-2 text-sm text-teal">
                 Connected as {instagramChannel.display_name}.
               </p>
+            ) : null}
+            {instagramConnection ? (
+              <div className="rounded border border-[#bfe7df] bg-[#edf8f5] px-3 py-2 text-sm text-teal">
+                <div>Username: {instagramConnection.instagram_username || "Unknown"}</div>
+                <div>Instagram ID: {instagramConnection.instagram_account_id}</div>
+                <div>Page ID: {instagramConnection.facebook_page_id}</div>
+              </div>
+            ) : null}
+            {instagramConnected ? (
+              <button
+                className="inline-flex items-center gap-2 rounded-lg border border-[#f0c8c2] bg-white px-4 py-2 text-sm font-medium text-coral shadow-sm disabled:opacity-60"
+                disabled={disconnectingInstagram}
+                onClick={disconnectInstagram}
+                type="button"
+              >
+                {disconnectingInstagram ? <Loader2 size={16} className="animate-spin" /> : <Instagram size={16} />}
+                {disconnectingInstagram ? "Disconnecting..." : "Disconnect Instagram"}
+              </button>
             ) : null}
             {instagramNeedsReconnect ? (
               <p className="rounded border border-[#f0c8c2] bg-[#fff4f2] px-3 py-2 text-sm text-coral">

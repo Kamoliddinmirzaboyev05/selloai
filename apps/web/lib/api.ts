@@ -37,6 +37,19 @@ export interface InstagramOAuthLoginResponse {
   authorization_url: string;
 }
 
+export interface InstagramConnectionResponse {
+  channel: Channel;
+  instagram_username: string | null;
+  instagram_account_id: string;
+  facebook_page_id: string;
+  facebook_page_name: string;
+}
+
+export interface InstagramDisconnectResponse {
+  channel: Channel;
+  status: string;
+}
+
 export interface Conversation {
   id: string;
   organization_id: string;

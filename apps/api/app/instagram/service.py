@@ -33,6 +33,13 @@ class MetaPage:
     access_token: str
 
 
+@dataclass(frozen=True)
+class MetaInstagramConnection:
+    channel: Channel
+    page: MetaPage
+    instagram_profile: dict[str, Any]
+
+
 class MetaService:
     def __init__(self, api_version: str | None = None) -> None:
         self.api_version = api_version or settings.meta_graph_api_version
@@ -122,6 +129,20 @@ class MetaService:
                 pages.append(MetaPage(id=page_id, name=name, access_token=page_token))
         return pages
 
+    async def debug_token(self, access_token: str) -> dict[str, Any]:
+        self._ensure_meta_app_settings()
+        data = await self._get_json(
+            "/debug_token",
+            params={
+                "input_token": access_token,
+                "access_token": f"{settings.meta_app_id}|{settings.meta_app_secret}",
+            },
+        )
+        token_data = data.get("data")
+        if not isinstance(token_data, dict):
+            raise AppError("Meta token debug returned an invalid response.", "META_TOKEN_DEBUG_INVALID_RESPONSE", 502)
+        return token_data
+
     async def get_instagram_business(self, page: MetaPage) -> dict[str, Any] | None:
         data = await self._get_json(
             f"/{page.id}",
@@ -132,6 +153,66 @@ class MetaService:
         )
         instagram_business = data.get("instagram_business_account")
         return instagram_business if isinstance(instagram_business, dict) else None
+
+    async def get_instagram_profile(self, instagram_account_id: str, page_access_token: str) -> dict[str, Any]:
+        data = await self._get_json(
+            f"/{instagram_account_id}",
+            params={
+                "access_token": page_access_token,
+                "fields": "id,username,name,profile_picture_url",
+            },
+        )
+        if not isinstance(data.get("id"), str):
+            raise AppError("Instagram profile response is missing an id.", "META_INSTAGRAM_PROFILE_INVALID", 502)
+        return data
+
+    async def connect_with_access_token(
+        self,
+        session: AsyncSession,
+        *,
+        organization_id: str,
+        access_token: str,
+        connected_by_user_id: str,
+    ) -> MetaInstagramConnection:
+        token_debug = await self.debug_token(access_token)
+        if token_debug.get("is_valid") is not True:
+            raise AppError("Meta access token is invalid.", "META_ACCESS_TOKEN_INVALID", 401)
+
+        pages = await self.get_pages(access_token)
+        if not pages:
+            raise AppError("No Facebook Pages were found for this token.", "META_PAGE_NOT_FOUND_FOR_TOKEN", 400)
+
+        for page in pages:
+            instagram_business = await self.get_instagram_business(page)
+            if instagram_business is None:
+                continue
+            instagram_id = instagram_business.get("id")
+            if not isinstance(instagram_id, str):
+                continue
+            instagram_profile = await self.get_instagram_profile(instagram_id, page.access_token)
+            channel = await self.save_channel(
+                session,
+                organization_id=organization_id,
+                page=page,
+                instagram_business={**instagram_business, **instagram_profile},
+                user_access_token=access_token,
+                connected_by_user_id=connected_by_user_id,
+            )
+            log_oauth_event(
+                "manual_instagram_token_connected",
+                provider=OAuthProvider.meta,
+                organization_id=organization_id,
+                channel_id=channel.id,
+                facebook_page_id=page.id,
+                instagram_business_account_id=instagram_id,
+            )
+            return MetaInstagramConnection(channel=channel, page=page, instagram_profile=instagram_profile)
+
+        raise AppError(
+            "No Instagram Business Account is linked to the Facebook Pages available to this token.",
+            "META_INSTAGRAM_ACCOUNT_NOT_FOUND_FOR_TOKEN",
+            400,
+        )
 
     async def save_channel(
         self,
@@ -178,6 +259,29 @@ class MetaService:
             },
             status=ChannelStatus.active,
         )
+
+    async def disconnect_channel(self, session: AsyncSession, channel: Channel) -> Channel:
+        if channel.type != ChannelType.instagram:
+            raise AppError("Channel is not an Instagram channel.", "CHANNEL_TYPE_INVALID", 400)
+        metadata = dict(channel.metadata_json)
+        metadata.update(
+            {
+                "token_status": "disconnected",
+                "disconnected_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        channel.credentials = {}
+        channel.metadata_json = metadata
+        channel.status = ChannelStatus.disabled
+        await session.commit()
+        await session.refresh(channel)
+        log_oauth_event(
+            "instagram_channel_disconnected",
+            provider=OAuthProvider.meta,
+            organization_id=channel.organization_id,
+            channel_id=channel.id,
+        )
+        return channel
 
     async def ensure_fresh_channel_tokens(self, session: AsyncSession, channel: Channel) -> Channel:
         if not self._is_token_refresh_due(channel):
@@ -273,6 +377,10 @@ class MetaService:
     def _ensure_oauth_settings(self) -> None:
         if not settings.meta_app_id or not settings.meta_app_secret or not settings.meta_oauth_callback_url:
             raise AppError("Meta OAuth is not configured.", "META_OAUTH_NOT_CONFIGURED", 503)
+
+    def _ensure_meta_app_settings(self) -> None:
+        if not settings.meta_app_id or not settings.meta_app_secret:
+            raise AppError("Meta app credentials are not configured.", "META_APP_NOT_CONFIGURED", 503)
 
     def _ensure_oauth_login_settings(self) -> None:
         if not settings.meta_app_id or not settings.meta_oauth_callback_url:

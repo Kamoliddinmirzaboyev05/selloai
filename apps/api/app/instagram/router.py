@@ -7,12 +7,20 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
+from app.channels.models import Channel
 from app.channels.schemas import ChannelRead
 from app.core.config import settings
 from app.core.database import get_session
+from app.core.enums import ChannelType
 from app.core.errors import AppError
 from app.instagram.handlers import dispatch_instagram_webhook
-from app.instagram.schemas import InstagramOAuthCallbackResponse, InstagramOAuthLoginResponse
+from app.instagram.schemas import (
+    InstagramConnectionResponse,
+    InstagramDisconnectResponse,
+    InstagramManualTokenConnectRequest,
+    InstagramOAuthCallbackResponse,
+    InstagramOAuthLoginResponse,
+)
 from app.instagram.service import MetaService, _normalize_oauth_token
 from app.oauth.audit import log_oauth_event
 from app.oauth.schemas import OAuthProvider
@@ -22,6 +30,54 @@ from app.users.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["instagram"])
+
+
+@router.post(
+    "/integrations/instagram/token/connect",
+    response_model=InstagramConnectionResponse,
+    summary="Connect Instagram with a generated Meta access token",
+    description="Verifies a generated Meta access token, discovers the connected Facebook Page and Instagram Business "
+    "Account, stores encrypted credentials, and returns safe account identifiers only.",
+)
+async def instagram_manual_token_connect(
+    data: InstagramManualTokenConnectRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> InstagramConnectionResponse:
+    await ensure_org_member(session, current_user, data.organization_id)
+    connection = await MetaService().connect_with_access_token(
+        session,
+        organization_id=data.organization_id,
+        access_token=data.access_token,
+        connected_by_user_id=current_user.id,
+    )
+    instagram_username = connection.instagram_profile.get("username")
+    return InstagramConnectionResponse(
+        channel=ChannelRead.model_validate(connection.channel),
+        instagram_username=instagram_username if isinstance(instagram_username, str) else None,
+        instagram_account_id=connection.channel.external_id or connection.instagram_profile["id"],
+        facebook_page_id=connection.page.id,
+        facebook_page_name=connection.page.name,
+    )
+
+
+@router.post(
+    "/integrations/instagram/channels/{channel_id}/disconnect",
+    response_model=InstagramDisconnectResponse,
+    summary="Disconnect an Instagram channel",
+    description="Clears stored Meta credentials and marks the Instagram channel disabled.",
+)
+async def instagram_disconnect_channel(
+    channel_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> InstagramDisconnectResponse:
+    channel = await session.get(Channel, channel_id)
+    if channel is None or channel.type != ChannelType.instagram:
+        raise AppError("Instagram channel not found.", "INSTAGRAM_CHANNEL_NOT_FOUND", 404)
+    await ensure_org_member(session, current_user, channel.organization_id)
+    disconnected = await MetaService().disconnect_channel(session, channel)
+    return InstagramDisconnectResponse(channel=ChannelRead.model_validate(disconnected), status="disconnected")
 
 
 @router.get(

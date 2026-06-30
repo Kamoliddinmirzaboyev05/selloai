@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from httpx import AsyncClient
+from sqlalchemy import select
 
+from app.channels.models import Channel
 from app.core.enums import ChannelStatus, ChannelType
 from app.core.errors import AppError
 from app.core.security import create_access_token, decode_access_token
@@ -256,6 +258,125 @@ async def test_instagram_oauth_callback_rejects_bad_state(client: AsyncClient):
 
     assert response.status_code == 400
     assert response.json()["code"] == "META_OAUTH_INVALID_STATE"
+
+
+async def test_instagram_manual_token_connect_verifies_token_and_saves_safe_channel(client: AsyncClient, monkeypatch):
+    from app.instagram import router as instagram_router
+
+    async def fake_debug_token(self, access_token: str):
+        assert access_token == "manual-user-token"
+        return {"is_valid": True, "user_id": "meta-user-1", "scopes": ["pages_show_list"]}
+
+    async def fake_get_pages(self, access_token: str):
+        assert access_token == "manual-user-token"
+        return [MetaPage(id="page-1", name="Demo Page", access_token="manual-page-token")]
+
+    async def fake_get_instagram_business(self, page: MetaPage):
+        return {"id": "ig-1", "username": "demo_shop", "name": "Demo Shop"}
+
+    async def fake_get_instagram_profile(self, instagram_account_id: str, page_access_token: str):
+        assert instagram_account_id == "ig-1"
+        assert page_access_token == "manual-page-token"
+        return {"id": "ig-1", "username": "demo_shop", "name": "Demo Shop"}
+
+    monkeypatch.setattr(instagram_router.MetaService, "debug_token", fake_debug_token)
+    monkeypatch.setattr(instagram_router.MetaService, "get_pages", fake_get_pages)
+    monkeypatch.setattr(instagram_router.MetaService, "get_instagram_business", fake_get_instagram_business)
+    monkeypatch.setattr(instagram_router.MetaService, "get_instagram_profile", fake_get_instagram_profile)
+
+    token, organization_id = await register_and_create_org(client)
+    response = await client.post(
+        "/api/v1/integrations/instagram/token/connect",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"organization_id": organization_id, "access_token": "manual-user-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["instagram_username"] == "demo_shop"
+    assert body["instagram_account_id"] == "ig-1"
+    assert body["facebook_page_id"] == "page-1"
+    assert body["facebook_page_name"] == "Demo Page"
+    assert body["channel"]["status"] == "active"
+    assert body["channel"]["external_id"] == "ig-1"
+    assert "manual-user-token" not in str(body)
+    assert "manual-page-token" not in str(body)
+
+    channels = await client.get(
+        "/api/v1/channels",
+        params={"organization_id": organization_id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    saved = channels.json()
+    assert saved[0]["type"] == "instagram"
+    assert "credentials" not in saved[0]
+
+
+async def test_instagram_manual_token_connect_rejects_invalid_token(client: AsyncClient, monkeypatch):
+    from app.instagram import router as instagram_router
+
+    async def fake_debug_token(self, access_token: str):
+        return {"is_valid": False}
+
+    monkeypatch.setattr(instagram_router.MetaService, "debug_token", fake_debug_token)
+    token, organization_id = await register_and_create_org(client)
+
+    response = await client.post(
+        "/api/v1/integrations/instagram/token/connect",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"organization_id": organization_id, "access_token": "bad-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "META_ACCESS_TOKEN_INVALID"
+
+
+async def test_instagram_disconnect_clears_credentials_and_disables_channel(client: AsyncClient, monkeypatch):
+    from app.instagram import router as instagram_router
+
+    async def fake_debug_token(self, access_token: str):
+        return {"is_valid": True}
+
+    async def fake_get_pages(self, access_token: str):
+        return [MetaPage(id="page-1", name="Demo Page", access_token="manual-page-token")]
+
+    async def fake_get_instagram_business(self, page: MetaPage):
+        return {"id": "ig-1", "username": "demo_shop"}
+
+    async def fake_get_instagram_profile(self, instagram_account_id: str, page_access_token: str):
+        return {"id": "ig-1", "username": "demo_shop"}
+
+    monkeypatch.setattr(instagram_router.MetaService, "debug_token", fake_debug_token)
+    monkeypatch.setattr(instagram_router.MetaService, "get_pages", fake_get_pages)
+    monkeypatch.setattr(instagram_router.MetaService, "get_instagram_business", fake_get_instagram_business)
+    monkeypatch.setattr(instagram_router.MetaService, "get_instagram_profile", fake_get_instagram_profile)
+    token, organization_id = await register_and_create_org(client)
+    connect = await client.post(
+        "/api/v1/integrations/instagram/token/connect",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"organization_id": organization_id, "access_token": "manual-user-token"},
+    )
+    channel_id = connect.json()["channel"]["id"]
+
+    disconnect = await client.post(
+        f"/api/v1/integrations/instagram/channels/{channel_id}/disconnect",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert disconnect.status_code == 200
+    assert disconnect.json()["status"] == "disconnected"
+    assert disconnect.json()["channel"]["status"] == "disabled"
+
+    from app.core.database import get_session
+    from app.main import app
+
+    override = app.dependency_overrides[get_session]
+    async for session in override():
+        channel = await session.scalar(select(Channel).where(Channel.id == channel_id))
+        assert channel.credentials == {}
+        assert channel.status == ChannelStatus.disabled
+        assert channel.metadata_json["token_status"] == "disconnected"
+        break
 
 
 async def test_instagram_save_channel_encrypts_meta_tokens_and_saves_account_metadata(monkeypatch):
