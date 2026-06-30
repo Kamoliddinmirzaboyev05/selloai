@@ -35,8 +35,12 @@ services:
     environment:
       API_ENV: production
       API_CORS_ORIGINS: https://sello.webportfolio.uz
+      FRONTEND_URL: https://sello.webportfolio.uz
       API_DATABASE_URL: ${API_DATABASE_URL}
       API_REDIS_URL: ${API_REDIS_URL}
+      OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY}
+      OAUTH_TOKEN_ENCRYPTION_KEY_VERSION: ${OAUTH_TOKEN_ENCRYPTION_KEY_VERSION:-v1}
+      OAUTH_TOKEN_REFRESH_WINDOW_DAYS: ${OAUTH_TOKEN_REFRESH_WINDOW_DAYS:-7}
       META_OAUTH_CALLBACK_URL: https://selloapi.webportfolio.uz/auth/meta/callback
       INSTAGRAM_WEBHOOK_URL: https://selloapi.webportfolio.uz/webhooks/instagram
     ports:

@@ -1,30 +1,91 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, Instagram, Loader2, Send } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { apiRequest, Channel, getStoredOrganizationId } from "@/lib/api";
+import {
+  apiRequest,
+  Channel,
+  getStoredOrganizationId,
+  getToken,
+  InstagramOAuthLoginResponse,
+  Organization,
+  setStoredOrganizationId,
+} from "@/lib/api";
 
 export default function ChannelsPage() {
+  const router = useRouter();
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState(false);
-  const organizationId = getStoredOrganizationId();
+  const [connectingTelegram, setConnectingTelegram] = useState(false);
+  const [connectingInstagram, setConnectingInstagram] = useState(false);
 
-  function refresh() {
-    if (!organizationId) return;
-    apiRequest<Channel[]>(`/channels?organization_id=${organizationId}`)
-      .then(setChannels)
-      .catch(() => setChannels([]));
+  async function refreshChannels(activeOrganizationId = organizationId) {
+    if (!activeOrganizationId) return;
+    try {
+      const channelItems = await apiRequest<Channel[]>(`/channels?organization_id=${activeOrganizationId}`);
+      setChannels(channelItems);
+    } catch {
+      setChannels([]);
+    }
   }
 
-  useEffect(refresh, [organizationId]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadChannels() {
+      if (!getToken()) {
+        router.replace("/login");
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      try {
+        const organizations = await apiRequest<Organization[]>("/organizations");
+        if (cancelled) return;
+        if (organizations.length === 0) {
+          router.replace("/dashboard/onboarding");
+          return;
+        }
+
+        const storedOrganizationId = getStoredOrganizationId();
+        const activeOrganization =
+          organizations.find((organization) => organization.id === storedOrganizationId) || organizations[0];
+        setStoredOrganizationId(activeOrganization.id);
+        setOrganizationId(activeOrganization.id);
+        await refreshChannels(activeOrganization.id);
+
+        const instagramStatus = new URLSearchParams(window.location.search).get("instagram");
+        if (instagramStatus === "connected") {
+          setMessage("Instagram connected successfully.");
+        } else if (instagramStatus === "no_instagram_business_account") {
+          setError("Meta OAuth finished, but no Instagram Business Account was found on the selected Facebook Pages.");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not load channels.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadChannels();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function connectTelegram(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!organizationId) return;
-    setConnecting(true);
+    if (!organizationId) {
+      router.replace("/dashboard/onboarding");
+      return;
+    }
+    setConnectingTelegram(true);
     setMessage(null);
     setError(null);
     const form = new FormData(event.currentTarget);
@@ -34,19 +95,55 @@ export default function ChannelsPage() {
         body: { organization_id: organizationId, bot_token: String(form.get("bot_token")) },
       });
       setMessage(`Telegram connected. Webhook path: ${response.webhook_path}`);
-      refresh();
+      refreshChannels(organizationId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not connect Telegram");
     } finally {
-      setConnecting(false);
+      setConnectingTelegram(false);
+    }
+  }
+
+  async function connectInstagram() {
+    if (!organizationId) {
+      router.replace("/dashboard/onboarding");
+      return;
+    }
+
+    setConnectingInstagram(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const response = await apiRequest<InstagramOAuthLoginResponse>(
+        `/integrations/instagram/oauth/login?organization_id=${encodeURIComponent(organizationId)}`,
+      );
+      window.location.assign(response.authorization_url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start Instagram connection.");
+      setConnectingInstagram(false);
     }
   }
 
   const telegramChannel = channels.find((channel) => channel.type === "telegram");
+  const instagramChannel = channels.find((channel) => channel.type === "instagram");
+  const instagramNeedsReconnect =
+    instagramChannel?.status === "needs_reconnect" || instagramChannel?.status === "error";
+
+  if (loading) {
+    return (
+      <div className="grid min-h-[60vh] place-items-center">
+        <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-5 py-4 text-sm text-zinc-600 shadow-sm">
+          <Loader2 size={16} className="animate-spin text-teal" />
+          Loading channels...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
       <PageHeader title="Channels" description="Connect customer messaging channels and monitor integration status." />
+      {message ? <p className="mb-4 rounded border border-[#bfe7df] bg-[#edf8f5] px-3 py-2 text-sm text-teal">{message}</p> : null}
+      {error ? <p className="mb-4 rounded border border-[#f0c8c2] bg-[#fff4f2] px-3 py-2 text-sm text-coral">{error}</p> : null}
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between gap-4">
@@ -74,13 +171,11 @@ export default function ChannelsPage() {
             <button
               className="mt-4 inline-flex items-center gap-2 rounded-lg bg-teal px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
               type="submit"
-              disabled={connecting}
+              disabled={connectingTelegram}
             >
-              {connecting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-              {connecting ? "Connecting..." : "Connect Telegram"}
+              {connectingTelegram ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              {connectingTelegram ? "Connecting..." : "Connect Telegram"}
             </button>
-            {message ? <p className="mt-3 rounded border border-[#bfe7df] bg-[#edf8f5] px-3 py-2 text-sm text-teal">{message}</p> : null}
-            {error ? <p className="mt-3 rounded border border-[#f0c8c2] bg-[#fff4f2] px-3 py-2 text-sm text-coral">{error}</p> : null}
           </form>
         </section>
         <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
@@ -94,12 +189,42 @@ export default function ChannelsPage() {
                 <p className="mt-1 text-sm text-zinc-600">Meta OAuth, webhook verification, DM, and comment handlers are scaffolded.</p>
               </div>
             </div>
-            <StatusBadge active={false} label="Skeleton" />
+            <StatusBadge
+              active={Boolean(instagramChannel) && !instagramNeedsReconnect}
+              label={instagramNeedsReconnect ? "Reconnect required" : instagramChannel ? "Connected" : "Ready"}
+            />
           </div>
           <div className="mt-5 space-y-3 border-t border-line pt-5 text-sm">
-            <FeatureRow text="OAuth callback placeholder" />
+            <FeatureRow text="Meta OAuth connection" />
             <FeatureRow text="Webhook verification endpoint" />
             <FeatureRow text="DM and comment event dispatch" />
+            {organizationId ? (
+              <button
+                className="mt-2 inline-flex items-center gap-2 rounded-lg bg-teal px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-60"
+                type="button"
+                onClick={connectInstagram}
+                disabled={connectingInstagram || (Boolean(instagramChannel) && !instagramNeedsReconnect)}
+              >
+                {connectingInstagram ? <Loader2 size={16} className="animate-spin" /> : <Instagram size={16} />}
+                {instagramChannel && !instagramNeedsReconnect
+                  ? "Instagram connected"
+                  : connectingInstagram
+                    ? "Opening Meta..."
+                    : instagramNeedsReconnect
+                      ? "Reconnect Instagram"
+                      : "Connect Instagram"}
+              </button>
+            ) : null}
+            {instagramChannel && !instagramNeedsReconnect ? (
+              <p className="rounded border border-[#bfe7df] bg-[#edf8f5] px-3 py-2 text-sm text-teal">
+                Connected as {instagramChannel.display_name}.
+              </p>
+            ) : null}
+            {instagramNeedsReconnect ? (
+              <p className="rounded border border-[#f0c8c2] bg-[#fff4f2] px-3 py-2 text-sm text-coral">
+                The saved Meta token needs a fresh OAuth connection.
+              </p>
+            ) : null}
           </div>
         </section>
       </div>

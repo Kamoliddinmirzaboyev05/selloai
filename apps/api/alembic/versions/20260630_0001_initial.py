@@ -7,8 +7,9 @@ Create Date: 2026-06-30
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "20260630_0001"
 down_revision: str | None = None
@@ -53,7 +54,11 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("id", sa.String(length=36), nullable=False),
         *timestamps(),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name=op.f("fk_organization_members_organization_id_organizations")),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_organization_members_organization_id_organizations"),
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_organization_members_user_id_users")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_organization_members")),
         sa.UniqueConstraint("organization_id", "user_id", name=op.f("uq_organization_members_organization_id")),
@@ -67,7 +72,11 @@ def upgrade() -> None:
         sa.Column("auto_reply_enabled", sa.Boolean(), nullable=False),
         sa.Column("id", sa.String(length=36), nullable=False),
         *timestamps(),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name=op.f("fk_organization_settings_organization_id_organizations")),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_organization_settings_organization_id_organizations"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_organization_settings")),
         sa.UniqueConstraint("organization_id", name=op.f("uq_organization_settings_organization_id")),
     )
@@ -83,7 +92,11 @@ def upgrade() -> None:
         sa.Column("metadata", sa.JSON(), nullable=False),
         sa.Column("id", sa.String(length=36), nullable=False),
         *timestamps(),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name=op.f("fk_channels_organization_id_organizations")),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_channels_organization_id_organizations"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_channels")),
         sa.UniqueConstraint("organization_id", "type", "external_id", name=op.f("uq_channels_organization_id")),
     )
@@ -99,7 +112,11 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=36), nullable=False),
         *timestamps(),
         sa.ForeignKeyConstraint(["channel_id"], ["channels.id"], name=op.f("fk_customers_channel_id_channels")),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name=op.f("fk_customers_organization_id_organizations")),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_customers_organization_id_organizations"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_customers")),
         sa.UniqueConstraint("organization_id", "channel_id", "external_id", name=op.f("uq_customers_organization_id")),
     )
@@ -114,12 +131,26 @@ def upgrade() -> None:
         sa.Column("last_message_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("id", sa.String(length=36), nullable=False),
         *timestamps(),
-        sa.ForeignKeyConstraint(["assigned_user_id"], ["users.id"], name=op.f("fk_conversations_assigned_user_id_users")),
+        sa.ForeignKeyConstraint(
+            ["assigned_user_id"],
+            ["users.id"],
+            name=op.f("fk_conversations_assigned_user_id_users"),
+        ),
         sa.ForeignKeyConstraint(["channel_id"], ["channels.id"], name=op.f("fk_conversations_channel_id_channels")),
         sa.ForeignKeyConstraint(["customer_id"], ["customers.id"], name=op.f("fk_conversations_customer_id_customers")),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name=op.f("fk_conversations_organization_id_organizations")),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_conversations_organization_id_organizations"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_conversations")),
-        sa.UniqueConstraint("organization_id", "channel_id", "customer_id", "status", name=op.f("uq_conversations_organization_id")),
+        sa.UniqueConstraint(
+            "organization_id",
+            "channel_id",
+            "customer_id",
+            "status",
+            name=op.f("uq_conversations_organization_id"),
+        ),
     )
 
     op.create_table(
@@ -130,7 +161,11 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), nullable=False),
         sa.Column("id", sa.String(length=36), nullable=False),
         *timestamps(),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name=op.f("fk_knowledge_base_entries_organization_id_organizations")),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_knowledge_base_entries_organization_id_organizations"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_knowledge_base_entries")),
     )
 
@@ -144,7 +179,11 @@ def upgrade() -> None:
         sa.Column("raw_payload", sa.JSON(), nullable=False),
         sa.Column("id", sa.String(length=36), nullable=False),
         *timestamps(),
-        sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"], name=op.f("fk_messages_conversation_id_conversations")),
+        sa.ForeignKeyConstraint(
+            ["conversation_id"],
+            ["conversations.id"],
+            name=op.f("fk_messages_conversation_id_conversations"),
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_messages")),
         sa.UniqueConstraint("conversation_id", "external_id", name=op.f("uq_messages_conversation_id")),
     )
@@ -162,4 +201,3 @@ def downgrade() -> None:
     op.drop_table("organizations")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
-

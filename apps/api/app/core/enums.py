@@ -17,6 +17,7 @@ class ChannelType(StrEnum):
 class ChannelStatus(StrEnum):
     pending = "pending"
     active = "active"
+    needs_reconnect = "needs_reconnect"
     disabled = "disabled"
     error = "error"
 
@@ -38,4 +39,3 @@ class SenderType(StrEnum):
     ai = "ai"
     operator = "operator"
     system = "system"
-

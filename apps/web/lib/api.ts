@@ -4,7 +4,7 @@ const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   "http://localhost:8000/api/v1";
-const API_BASE_URL = API_URL.endsWith("/api/v1")
+export const API_BASE_URL = API_URL.endsWith("/api/v1")
   ? API_URL
   : `${API_URL.replace(/\/$/, "")}/api/v1`;
 const TOKEN_KEY = "sello_access_token";
@@ -31,6 +31,10 @@ export interface Channel {
   status: string;
   display_name: string;
   external_id: string | null;
+}
+
+export interface InstagramOAuthLoginResponse {
+  authorization_url: string;
 }
 
 export interface Conversation {
@@ -109,6 +113,7 @@ export async function apiRequest<T>(
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method || "GET",
     headers: {
+      Accept: "application/json",
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },

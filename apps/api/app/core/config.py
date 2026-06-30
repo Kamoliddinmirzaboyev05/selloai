@@ -25,6 +25,10 @@ class Settings(BaseSettings):
         alias="API_ACCESS_TOKEN_EXPIRE_MINUTES",
     )
     cors_origins_raw: str = Field(default="http://localhost:3000", alias="API_CORS_ORIGINS")
+    frontend_url: str | None = Field(default=None, alias="FRONTEND_URL")
+    oauth_token_encryption_key: str | None = Field(default=None, alias="OAUTH_TOKEN_ENCRYPTION_KEY")
+    oauth_token_encryption_key_version: str = Field(default="v1", alias="OAUTH_TOKEN_ENCRYPTION_KEY_VERSION")
+    oauth_token_refresh_window_days: int = Field(default=7, alias="OAUTH_TOKEN_REFRESH_WINDOW_DAYS")
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
     meta_verify_token: str = Field(default="change-me", alias="META_VERIFY_TOKEN")
@@ -37,6 +41,14 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins_raw.split(",") if origin.strip()]
+
+    @property
+    def browser_frontend_url(self) -> str:
+        if self.frontend_url:
+            return self.frontend_url.rstrip("/")
+        if self.cors_origins:
+            return self.cors_origins[0].rstrip("/")
+        return "http://localhost:3000"
 
 
 @lru_cache
