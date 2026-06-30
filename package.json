@@ -1,0 +1,16 @@
+{
+  "name": "sello-ai",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web",
+    "packages/shared"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace @sello/web run dev",
+    "build:web": "npm --workspace @sello/web run build",
+    "lint:web": "npm --workspace @sello/web run lint",
+    "typecheck:web": "npm --workspace @sello/web run typecheck"
+  }
+}
+
