@@ -1,9 +1,13 @@
+import logging
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
 from app.core.errors import AppError
+from app.instagram.graph_errors import build_meta_graph_app_error, to_safe_log_json
+
+logger = logging.getLogger(__name__)
 
 
 class MetaGraphClient:
@@ -32,7 +36,33 @@ class MetaGraphClient:
                 params={"access_token": self.access_token},
                 json=payload,
             )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            logger.warning(
+                "Meta Graph API returned non-JSON response path=%s status_code=%s body=%s",
+                path,
+                response.status_code,
+                response.text,
+            )
+            raise AppError(
+                "Meta Graph API returned an invalid response.", "META_GRAPH_API_INVALID_RESPONSE", 502
+            ) from exc
+        if not isinstance(data, dict):
+            logger.warning(
+                "Meta Graph API returned invalid JSON shape path=%s status_code=%s body=%s",
+                path,
+                response.status_code,
+                to_safe_log_json(data),
+            )
+            raise AppError("Meta Graph API returned an invalid response.", "META_GRAPH_API_INVALID_RESPONSE", 502)
+        log_message = (
+            "Meta Graph API request failed path=%s status_code=%s body=%s"
+            if response.status_code >= 400
+            else "Meta Graph API response path=%s status_code=%s body=%s"
+        )
+        log_method = logger.warning if response.status_code >= 400 else logger.info
+        log_method(log_message, path, response.status_code, to_safe_log_json(data))
         if response.status_code >= 400:
-            raise AppError("Meta Graph API request failed.", "META_GRAPH_API_ERROR", 502)
-        return response.json()
-
+            raise build_meta_graph_app_error(data)
+        return data

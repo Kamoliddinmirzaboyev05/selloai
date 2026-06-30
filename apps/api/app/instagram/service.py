@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +13,7 @@ from app.core.config import settings
 from app.core.enums import ChannelStatus, ChannelType
 from app.core.errors import AppError
 from app.core.security import create_access_token, decode_access_token
+from app.instagram.graph_errors import build_meta_graph_app_error, to_safe_log_json
 from app.oauth.audit import log_oauth_event
 from app.oauth.crypto import decrypt_oauth_token, encrypt_oauth_token
 from app.oauth.schemas import OAuthAccessToken, OAuthProvider, ProviderAccountType
@@ -24,6 +26,8 @@ INSTAGRAM_OAUTH_SCOPES = (
     "pages_read_engagement",
     "business_management",
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -152,6 +156,12 @@ class MetaService:
             },
         )
         instagram_business = data.get("instagram_business_account")
+        if not isinstance(instagram_business, dict):
+            logger.info(
+                "Meta Page response missing instagram_business_account page_id=%s body=%s",
+                page.id,
+                to_safe_log_json(data),
+            )
         return instagram_business if isinstance(instagram_business, dict) else None
 
     async def get_instagram_profile(self, instagram_account_id: str, page_access_token: str) -> dict[str, Any]:
@@ -367,11 +377,36 @@ class MetaService:
     async def _get_json(self, path: str, *, params: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(f"{self.graph_base_url}{path}", params=params)
-        if response.status_code >= 400:
-            raise AppError("Meta Graph API request failed.", "META_GRAPH_API_ERROR", 502)
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            logger.warning(
+                "Meta Graph API returned non-JSON response path=%s status_code=%s body=%s",
+                path,
+                response.status_code,
+                response.text,
+            )
+            raise AppError(
+                "Meta Graph API returned an invalid response.", "META_GRAPH_API_INVALID_RESPONSE", 502
+            ) from exc
         if not isinstance(data, dict):
+            logger.warning(
+                "Meta Graph API returned invalid JSON shape path=%s status_code=%s body=%s",
+                path,
+                response.status_code,
+                to_safe_log_json(data),
+            )
             raise AppError("Meta Graph API returned an invalid response.", "META_GRAPH_API_INVALID_RESPONSE", 502)
+
+        log_message = (
+            "Meta Graph API request failed path=%s status_code=%s body=%s"
+            if response.status_code >= 400
+            else "Meta Graph API response path=%s status_code=%s body=%s"
+        )
+        log_method = logger.warning if response.status_code >= 400 else logger.info
+        log_method(log_message, path, response.status_code, to_safe_log_json(data))
+        if response.status_code >= 400:
+            raise build_meta_graph_app_error(data)
         return data
 
     def _ensure_oauth_settings(self) -> None:

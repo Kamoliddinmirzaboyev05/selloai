@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 from httpx import AsyncClient
+from httpx import AsyncClient as RealAsyncClient
 from sqlalchemy import select
 
 from app.channels.models import Channel
@@ -339,6 +341,116 @@ async def test_instagram_manual_token_connect_rejects_invalid_token(client: Asyn
 
     assert response.status_code == 401
     assert response.json()["code"] == "META_ACCESS_TOKEN_INVALID"
+
+
+async def test_instagram_manual_token_connect_returns_meta_graph_error_details(client: AsyncClient, monkeypatch):
+    from app.instagram import service as instagram_service
+
+    meta_response = {
+        "error": {
+            "message": "Unsupported get request. Object with ID 'me' does not exist.",
+            "type": "GraphMethodException",
+            "code": 100,
+            "fbtrace_id": "trace-123",
+        }
+    }
+
+    async def graph_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/debug_token")
+        return httpx.Response(400, json=meta_response)
+
+    transport = httpx.MockTransport(graph_handler)
+
+    def fake_async_client(*_args, **_kwargs):
+        return RealAsyncClient(transport=transport, base_url="https://graph.facebook.com")
+
+    monkeypatch.setattr(instagram_service.httpx, "AsyncClient", fake_async_client)
+    monkeypatch.setattr(instagram_service.settings, "meta_app_id", "meta-app-id")
+    monkeypatch.setattr(instagram_service.settings, "meta_app_secret", "meta-app-secret")
+    token, organization_id = await register_and_create_org(client)
+
+    response = await client.post(
+        "/api/v1/integrations/instagram/token/connect",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"organization_id": organization_id, "access_token": "bad-token"},
+    )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["code"] == "META_GRAPH_API_ERROR"
+    assert body["detail"] == "Unsupported get request. Object with ID 'me' does not exist."
+    assert body["meta_error"] == {
+        "code": 100,
+        "type": "GraphMethodException",
+        "message": "Unsupported get request. Object with ID 'me' does not exist.",
+        "fbtrace_id": "trace-123",
+    }
+
+
+async def test_instagram_missing_business_account_logs_complete_page_object(monkeypatch, caplog):
+    from app.instagram import service as instagram_service
+
+    page_response = {"id": "page-1", "name": "Demo Page"}
+
+    async def graph_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/page-1")
+        return httpx.Response(200, json=page_response)
+
+    transport = httpx.MockTransport(graph_handler)
+
+    def fake_async_client(*_args, **_kwargs):
+        return RealAsyncClient(transport=transport, base_url="https://graph.facebook.com")
+
+    monkeypatch.setattr(instagram_service.httpx, "AsyncClient", fake_async_client)
+
+    with caplog.at_level("INFO", logger="app.instagram.service"):
+        instagram_business = await instagram_service.MetaService().get_instagram_business(
+            MetaPage(id="page-1", name="Demo Page", access_token="page-token-secret")
+        )
+
+    assert instagram_business is None
+    assert "Meta Page response missing instagram_business_account" in caplog.text
+    assert json.dumps(page_response, sort_keys=True) in caplog.text
+    assert "page-token-secret" not in caplog.text
+
+
+async def test_meta_graph_client_returns_meta_error_details(monkeypatch):
+    from app.instagram import client as instagram_client
+
+    meta_response = {
+        "error": {
+            "message": "The user is not an Instagram business account.",
+            "type": "OAuthException",
+            "code": 10,
+            "fbtrace_id": "trace-send",
+        }
+    }
+
+    async def graph_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/me/messages")
+        return httpx.Response(400, json=meta_response)
+
+    transport = httpx.MockTransport(graph_handler)
+
+    def fake_async_client(*_args, **_kwargs):
+        return RealAsyncClient(transport=transport, base_url="https://graph.facebook.com")
+
+    monkeypatch.setattr(instagram_client.httpx, "AsyncClient", fake_async_client)
+
+    try:
+        await instagram_client.MetaGraphClient("page-token-secret").send_instagram_message("ig-user-1", "Hi")
+    except AppError as exc:
+        assert exc.status_code == 502
+        assert exc.code == "META_GRAPH_API_ERROR"
+        assert exc.detail == "The user is not an Instagram business account."
+        assert exc.extra["meta_error"] == {
+            "code": 10,
+            "type": "OAuthException",
+            "message": "The user is not an Instagram business account.",
+            "fbtrace_id": "trace-send",
+        }
+    else:
+        raise AssertionError("Expected MetaGraphClient to raise AppError")
 
 
 async def test_instagram_disconnect_clears_credentials_and_disables_channel(client: AsyncClient, monkeypatch):

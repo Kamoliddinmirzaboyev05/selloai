@@ -12,6 +12,27 @@ const ORG_KEY = "sello_organization_id";
 
 export type ApiMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
+export interface ApiErrorPayload {
+  detail?: string;
+  code?: string;
+  meta_error?: {
+    code?: number | string | null;
+    type?: string | null;
+    message?: string | null;
+    fbtrace_id?: string | null;
+  };
+}
+
+export class ApiError extends Error {
+  payload: ApiErrorPayload;
+
+  constructor(payload: ApiErrorPayload) {
+    super(formatApiError(payload));
+    this.name = "ApiError";
+    this.payload = payload;
+  }
+}
+
 export interface User {
   id: string;
   email: string;
@@ -135,8 +156,8 @@ export async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(error.detail || "Request failed");
+    const error = (await response.json().catch(() => ({ detail: "Request failed" }))) as ApiErrorPayload;
+    throw new ApiError(error);
   }
 
   if (response.status === 204) {
@@ -144,4 +165,14 @@ export async function apiRequest<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+function formatApiError(error: ApiErrorPayload) {
+  if (error.meta_error) {
+    const metaCode = error.meta_error.code ?? "unknown";
+    const metaType = error.meta_error.type || "unknown";
+    const metaMessage = error.meta_error.message || error.detail || "Meta Graph API request failed.";
+    return `Meta error ${metaCode} (${metaType}): ${metaMessage}`;
+  }
+  return error.detail || "Request failed";
 }
