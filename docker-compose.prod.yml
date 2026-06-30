@@ -41,6 +41,7 @@ services:
       OAUTH_TOKEN_ENCRYPTION_KEY: ${OAUTH_TOKEN_ENCRYPTION_KEY}
       OAUTH_TOKEN_ENCRYPTION_KEY_VERSION: ${OAUTH_TOKEN_ENCRYPTION_KEY_VERSION:-v1}
       OAUTH_TOKEN_REFRESH_WINDOW_DAYS: ${OAUTH_TOKEN_REFRESH_WINDOW_DAYS:-7}
+      TELEGRAM_WEBHOOK_BASE_URL: https://selloapi.webportfolio.uz
       META_OAUTH_CALLBACK_URL: https://selloapi.webportfolio.uz/auth/meta/callback
       INSTAGRAM_WEBHOOK_URL: https://selloapi.webportfolio.uz/webhooks/instagram
     ports:

@@ -9,6 +9,7 @@ from app.auth.dependencies import get_current_user
 from app.channels.schemas import ChannelRead
 from app.channels.services import get_channel, upsert_channel
 from app.conversations.services import get_or_create_open_conversation, touch_conversation
+from app.core.config import settings as app_settings
 from app.core.database import get_session
 from app.core.enums import ChannelStatus, ChannelType, MessageDirection, SenderType
 from app.core.errors import AppError
@@ -33,7 +34,8 @@ async def connect_telegram_bot(
     session: AsyncSession = Depends(get_session),
 ) -> TelegramConnectResponse:
     await ensure_org_member(session, current_user, data.organization_id)
-    bot = await TelegramClient(data.bot_token).get_me()
+    telegram = TelegramClient(data.bot_token)
+    bot = await telegram.get_me()
     channel = await upsert_channel(
         session,
         organization_id=data.organization_id,
@@ -44,9 +46,16 @@ async def connect_telegram_bot(
         metadata={"bot": bot},
         status=ChannelStatus.active,
     )
+    webhook_path = f"/api/v1/webhooks/telegram/{channel.id}"
+    if app_settings.telegram_webhook_base_url:
+        webhook_url = f"{app_settings.telegram_webhook_base_url.rstrip('/')}{webhook_path}"
+        await telegram.set_webhook(webhook_url)
+        logger.info("Registered Telegram webhook channel_id=%s url=%s", channel.id, webhook_url)
+    else:
+        logger.warning("Telegram webhook base URL is not configured channel_id=%s", channel.id)
     return TelegramConnectResponse(
         channel=ChannelRead.model_validate(channel),
-        webhook_path=f"/api/v1/webhooks/telegram/{channel.id}",
+        webhook_path=webhook_path,
     )
 
 
@@ -56,22 +65,29 @@ async def telegram_webhook(
     payload: dict,
     session: AsyncSession = Depends(get_session),
 ) -> TelegramWebhookResponse:
+    logger.info("Received Telegram webhook channel_id=%s", channel_id)
     channel = await get_channel(session, channel_id)
     if channel.type != ChannelType.telegram or channel.status != ChannelStatus.active:
         raise AppError("Telegram channel is not active.", "CHANNEL_NOT_ACTIVE", 404)
 
     inbound = parse_telegram_update(payload)
     if inbound is None:
-        logger.info("Ignoring unsupported Telegram update", extra={"channel_id": channel_id})
+        logger.info("Ignoring unsupported Telegram update channel_id=%s", channel_id)
         return TelegramWebhookResponse(ok=True)
+    logger.info(
+        "Parsed Telegram message channel_id=%s chat_id=%s external_message_id=%s",
+        channel_id,
+        inbound.chat_id,
+        inbound.external_message_id,
+    )
 
     organization = await session.get(Organization, channel.organization_id)
-    settings = await session.scalar(
+    org_settings = await session.scalar(
         select(OrganizationSettings).where(
             OrganizationSettings.organization_id == channel.organization_id
         )
     )
-    if organization is None or settings is None:
+    if organization is None or org_settings is None:
         raise AppError("Channel organization is not configured.", "ORGANIZATION_NOT_FOUND", 404)
 
     customer = await upsert_customer(
@@ -101,17 +117,30 @@ async def telegram_webhook(
     await touch_conversation(conversation)
     await session.commit()
     await session.refresh(conversation)
+    logger.info(
+        "Saved Telegram inbound message channel_id=%s conversation_id=%s message_id=%s created=%s",
+        channel_id,
+        conversation.id,
+        inbound_message.id,
+        created,
+    )
 
     if not created:
         return TelegramWebhookResponse(ok=True, created=False, reply_sent=False)
 
-    if not settings.auto_reply_enabled:
+    if not org_settings.auto_reply_enabled:
+        logger.info(
+            "Telegram auto-reply disabled channel_id=%s organization_id=%s",
+            channel_id,
+            channel.organization_id,
+        )
         return TelegramWebhookResponse(ok=True, created=True, reply_sent=False)
 
+    logger.info("Calling Groq for Telegram reply channel_id=%s conversation_id=%s", channel_id, conversation.id)
     reply = await generate_ai_reply(
         session,
         organization=organization,
-        settings=settings,
+        settings=org_settings,
         conversation_id=conversation.id,
         incoming_message=inbound_message.body,
     )
@@ -126,6 +155,12 @@ async def telegram_webhook(
     await touch_conversation(conversation)
     await session.commit()
     await session.refresh(outbound_message)
+    logger.info(
+        "Saved Telegram outbound AI message channel_id=%s conversation_id=%s message_id=%s",
+        channel_id,
+        conversation.id,
+        outbound_message.id,
+    )
     await TelegramClient(channel.credentials["bot_token"]).send_message(inbound.chat_id, reply)
+    logger.info("Sent Telegram reply channel_id=%s chat_id=%s", channel_id, inbound.chat_id)
     return TelegramWebhookResponse(ok=True, created=True, reply_sent=True)
-

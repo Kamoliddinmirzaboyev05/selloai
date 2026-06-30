@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     oauth_token_refresh_window_days: int = Field(default=7, alias="OAUTH_TOKEN_REFRESH_WINDOW_DAYS")
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
+    telegram_webhook_base_url: str | None = Field(default=None, alias="TELEGRAM_WEBHOOK_BASE_URL")
     meta_verify_token: str = Field(default="change-me", alias="META_VERIFY_TOKEN")
     meta_graph_api_version: str = Field(default="v20.0", alias="META_GRAPH_API_VERSION")
     meta_app_id: str | None = Field(default=None, alias="META_APP_ID")
